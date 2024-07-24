@@ -126,31 +126,31 @@ class GPT(nn.Module):
         
         return sequence
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    attention = Attention(64, 5, 16)
-    mha = MultiHeadAttention(17, 64, 5, 16)
-    block = Block(num_heads=4, embedding_dim=64, seq_len=5, head_dim=16, dropout=0.0)
-    gpt = GPT(num_blocks=12,
-              vocab_size=256,
-              seq_len=5,
-              num_heads=4,
-              head_dim=16,
-              dropout=0.0,
-              embedding_dim=64
-            )
+#     attention = Attention(64, 5, 16)
+#     mha = MultiHeadAttention(17, 64, 5, 16)
+#     block = Block(num_heads=4, embedding_dim=64, seq_len=5, head_dim=16, dropout=0.0)
+#     gpt = GPT(num_blocks=12,
+#               vocab_size=256,
+#               seq_len=5,
+#               num_heads=4,
+#               head_dim=16,
+#               dropout=0.0,
+#               embedding_dim=64
+#             )
 
-    # x = torch.randn(1, 5, 256)
-    x = torch.randint(low=0, high=255, size=(1, 2))
+#     # x = torch.randn(1, 5, 256)
+#     x = torch.randint(low=0, high=255, size=(1, 2))
 
-    out = gpt(x)
+#     out = gpt(x)
 
-    seq = torch.zeros((1,1), dtype=torch.long)
+#     seq = torch.zeros((1,1), dtype=torch.long)
 
-    output = gpt.generate(seq, max_lookback_tokens=5)
+#     output = gpt.generate(seq, max_lookback_tokens=5)
 
 
-    ipdb.set_trace()
+#     ipdb.set_trace()
 
 
 

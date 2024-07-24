@@ -5,6 +5,7 @@ from dataset import get_data, GPTDataset
 from model import GPT
 import collections
 from tqdm import tqdm
+import ipdb
 
 # basic hparams
 train_batch_size = 2048

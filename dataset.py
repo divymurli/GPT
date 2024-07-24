@@ -50,21 +50,21 @@ class Text_Processor:
     def get_data(self):
         return requests.get("https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt").text
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    text = get_data()
-    dataset = GPTDataset(text=text, block_size=8)
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=False)
-    vocab_size = len(dataset.chars)
+#     text = get_data()
+#     dataset = GPTDataset(text=text, block_size=8)
+#     dataloader = DataLoader(dataset, batch_size=4, shuffle=False)
+#     vocab_size = len(dataset.chars)
 
-    for i, batch in enumerate(dataloader):
-        print(batch)
-        break
+#     for i, batch in enumerate(dataloader):
+#         print(batch)
+#         break
 
-    embedding_layer = nn.Embedding(vocab_size, 20)
+#     embedding_layer = nn.Embedding(vocab_size, 20)
 
-    embeddings = embedding_layer(batch['encoded_input'])
-    ipdb.set_trace()
+#     embeddings = embedding_layer(batch['encoded_input'])
+#     ipdb.set_trace()
 
 
 
