@@ -43,13 +43,14 @@ model = GPT(num_blocks=2,
               embedding_dim=768
             )
 
+model = model.to(device)
+
 enc = tiktoken.get_encoding("gpt2")
 text = "Hey, I'm a language model. Ask me a question about "
 encoded_tokens = enc.encode_ordinary(text)
 print("========= GENERATED OUTPUT ============")
 print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).numpy()[0].tolist()))
 
-model = model.to(device)
 # print the number of parameters in the model
 print("total model params:")
 print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
