@@ -47,7 +47,7 @@ enc = tiktoken.get_encoding("gpt2")
 text = "Hey, I'm a language model. Ask me a question about "
 encoded_tokens = enc.encode_ordinary(text)
 print("========= GENERATED OUTPUT ============")
-print(enc.decode(model.generate(torch.tensor([encoded_tokens]), 60, 100).numpy()[0].tolist()))
+print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).numpy()[0].tolist()))
 
 model = model.to(device)
 # print the number of parameters in the model
@@ -68,7 +68,7 @@ for epoch in range(epochs):
 
         if i % 1000 == 0:
             print("========= GENERATED OUTPUT ============")
-            print(enc.decode(model.generate(torch.tensor([encoded_tokens]), 60, 100).numpy()[0].tolist()))
+            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).numpy()[0].tolist()))
 
         inputs = batch[0].to(device)
         targets = batch[1].to(device)
