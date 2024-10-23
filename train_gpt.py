@@ -29,7 +29,7 @@ if not os.path.exists(save_dir):
 criterion = nn.CrossEntropyLoss()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-train_dataset = ShardedTokenDataset("./openwebtext_sharded", 500000, block_size)
+train_dataset = ShardedTokenDataset("./openwebtext_abridged_sharded", 500000, block_size)
 train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
 
 
