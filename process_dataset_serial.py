@@ -72,7 +72,7 @@ if __name__ == "__main__":
 
     # Write out the last shard, which will be partially filled -- this is after the above for loop terminates
     if start_delimiter > 0:
-        shard_path = os.path.join(local_dir, f"shard_val_{shard_idx}.npy")
+        shard_path = os.path.join(local_dir, f"val_shard_{shard_idx}.npy")
         print(f"Writing final Shard {shard_idx}...")  # For visibility
         write_doc_tokens(shard_path, all_tokens[:start_delimiter])
 
