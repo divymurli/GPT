@@ -8,15 +8,30 @@ from tqdm import tqdm
 import torch.optim.lr_scheduler as lr_scheduler
 import tiktoken
 
+from torch.nn.utils.rnn import pad_sequence
+
+
 import os
 
 # first pass rudimentary training loop
+# TODO: ADD MODEL SAVING IF IT CRASHES
+# TODO: ADD TENSORBOARD SHIT
 
-grad_accum_steps = 8
-train_batch_size = 64
+def collate_fn(batch):
+    input_tokens, target_tokens = zip(*batch)
+
+    max_len = max([x.size(0) for x in input_tokens])  # Find the longest sequence in the batch
+
+    padded_inputs = [torch.nn.functional.pad(x, (0, max_len - x.size(0))) for x in input_tokens]
+    padded_targets = [torch.nn.functional.pad(y, (0, max_len - y.size(0))) for y in target_tokens]
+
+    return torch.stack(padded_inputs), torch.stack(padded_targets)
+
+grad_accum_steps = 16
+train_batch_size = 32
 eval_batch_size = 32
 block_size = 512
-epochs = 5
+epochs = 10
 save_every = 1
 check_output_every = 1
 lr = 5e-4
@@ -30,9 +45,7 @@ criterion = nn.CrossEntropyLoss()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 train_dataset = ShardedTokenDataset("./openwebtext_abridged_sharded", 500000, block_size)
-train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
-
-
+train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True, collate_fn=collate_fn)
 
 model = GPT(num_blocks=2,
               vocab_size=50257,
@@ -49,7 +62,7 @@ enc = tiktoken.get_encoding("gpt2")
 text = "Hey, I'm a language model. Ask me a question about "
 encoded_tokens = enc.encode_ordinary(text)
 print("========= GENERATED OUTPUT ============")
-print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).numpy()[0].tolist()))
+print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).cpu().numpy()[0].tolist()))
 
 # print the number of parameters in the model
 print("total model params:")
@@ -67,9 +80,9 @@ for epoch in range(epochs):
     losses = []
     for i, batch in progress_bar:
 
-        if i % 1000 == 0:
+        if i % 20000 == 0:
             print("========= GENERATED OUTPUT ============")
-            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).numpy()[0].tolist()))
+            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).cpu().numpy()[0].tolist()))
 
         inputs = batch[0].to(device)
         targets = batch[1].to(device)
