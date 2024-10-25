@@ -28,11 +28,6 @@ class ShardedTokenDataset(Dataset):
         # Calculate total number of sequences
         # We subtract `seq_len` to account for the sequence and the autoregressive target shift
         self.total_sequences = total_tokens - seq_len
-        self.reset()
-
-    def reset(self):
-        self.shard_idx = 0
-        self.tokens = np.load(self.shard_files[self.shard_idx])
 
     def _load_shard(self, shard_idx):
         if self.cached_shard_idx != shard_idx:
@@ -60,23 +55,44 @@ class ShardedTokenDataset(Dataset):
 
         # test this edge case more carefully
         if len(selected_input) < self.seq_len:
-            next_shard_tokens = self._load_shard(shard_idx + 1)
-            num_remaining_input_tokens = self.seq_len - len(selected_input)
-            num_remaining_target_tokens = self.seq_len - len(selected_target)
+            # quick fix for now
+            if shard_idx + 1 < self.num_shards:
+                next_shard_tokens = self._load_shard(shard_idx + 1)
+                num_remaining_input_tokens = self.seq_len - len(selected_input)
+                num_remaining_target_tokens = self.seq_len - len(selected_target)
 
-            selected_input = np.concatenate((selected_input, next_shard_tokens[:num_remaining_input_tokens]), axis=0)
-            selected_target = np.concatenate((selected_target, next_shard_tokens[:num_remaining_target_tokens]), axis=0)
+                selected_input = np.concatenate((selected_input, next_shard_tokens[:num_remaining_input_tokens]), axis=0)
+                selected_target = np.concatenate((selected_target, next_shard_tokens[:num_remaining_target_tokens]), axis=0)
+            
+            else:
+                # If no next shard, pad the sequence to the required length
+                pad_len = self.seq_len - len(selected_input)
+                selected_input = np.pad(selected_input, (0, pad_len), constant_values=0)  # Padding value can be 0 or another token
+                selected_target = np.pad(selected_target, (0, pad_len), constant_values=0)
+
+        if len(selected_target) < self.seq_len:
+
+            if shard_idx + 1 < self.num_shards:
+                next_shard_tokens = self._load_shard(shard_idx + 1)
+                num_remaining_input_tokens = self.seq_len - len(selected_input)
+                num_remaining_target_tokens = self.seq_len - len(selected_target)
+                selected_target = np.concatenate((selected_target, next_shard_tokens[:num_remaining_target_tokens]), axis=0)
+            
+            else:
+                # If no next shard, pad the sequence to the required length
+                pad_len = self.seq_len - len(selected_input)
+                selected_target = np.pad(selected_target, (0, pad_len), constant_values=0)
 
         input_tokens = torch.tensor(selected_input, dtype=torch.long)
         target_tokens = torch.tensor(selected_target, dtype=torch.long)
 
         return input_tokens, target_tokens   
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    dataset = ShardedTokenDataset(shard_dir="./openwebtext_abridged_sharded", shard_size=500000, seq_len=20)
-    print(dataset.__len__())
-    input_tokens, target_tokens = dataset.__getitem__(10999979)
+#     dataset = ShardedTokenDataset(shard_dir="./openwebtext_abridged_sharded", shard_size=500000, seq_len=512)
+#     print(dataset.__len__())
+#     input_tokens, target_tokens = dataset.__getitem__(10999487)
 
-    import ipdb
-    ipdb.set_trace()
+#     import ipdb
+#     ipdb.set_trace()
