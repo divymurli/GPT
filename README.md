@@ -82,6 +82,8 @@ We noticed that our tiny model could hardly generalise well due to the tiny data
 
 Still quite incoherent! But, consistently, we notice that the model is able to recognise the word `data`, and, even if it doesn't use it properly when it continues, it's able to dig into its memory to find some meaning in the word. This suggests that the attention mechanism is working and that it's able to pay attention to semantically relevant words.
 
+We find that using a temperature of 0.3 produces the least chaotic outputs.
+
 *Play around with the attention matrices inside the model when I get a chance.*
 
 We leave this here, and move onto a beefier training run.
