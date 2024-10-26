@@ -109,16 +109,18 @@ class GPT(nn.Module):
 
         return out
     
-    def generate(self, sequence, max_lookback_tokens, max_new_tokens=1000):
+    def generate(self, sequence, max_lookback_tokens, max_new_tokens=1000, temperature=0.7):
         
+        # self.eval()
         for _ in range(max_new_tokens):
             # sequence has shape [bs, seq_len]
             input_sequence = sequence[:, -max_lookback_tokens:]
             # [bs, seq_len, vocab_size]
             logits = self.forward(input_sequence)
-            
+            # apply temperature scaling
+            logits = logits[:, -1, :] / temperature 
             # softmax the outputs from the very last sequence
-            next_token_probabilities = torch.softmax(logits[:, -1, :], dim=-1)
+            next_token_probabilities = torch.softmax(logits, dim=-1)
             # sample one token greedily (is it better to argmax or to multinomial sample?)
             sampled_next_token = torch.multinomial(next_token_probabilities, num_samples=1)
             # append to the input sequence
