@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
 import inspect
+import torch.nn.functional as F
 import ipdb
 
-# self attention module
+#### MANUAL, SLOW IMPLEMENTATION OF ATTENTION ####
 class Attention(nn.Module):
 
     def __init__(self, embedding_dim, seq_len, head_dim):
@@ -50,9 +51,52 @@ class MultiHeadAttention(nn.Module):
         out = torch.cat(all_head_outputs, dim=-1)
 
         return self.linear_out(out)
+#### MANUAL, SLOW IMPLEMENTATION OF ATTENTION ####
+    
+
+
+class CausalSelfAttention(nn.Module):
+    def __init__(self, 
+                embedding_dim, 
+                head_dim, 
+                num_heads):
+        super().__init__()
+
+        self.embedding_dim = embedding_dim
+        self.head_dim = head_dim
+        self.num_heads = num_heads
+        self.c_attn = nn.Linear(embedding_dim, 3*num_heads*head_dim, bias=False)
+        self.linear_out = nn.Linear(head_dim*num_heads, embedding_dim, bias=False)
+
+    # input has shape (bs, seq_len, emb_dim)
+    def forward(self, x):
+
+        # get the shapes of the input
+        bs, seq_len, _ = x.size()
+
+        # (bs, seq_len, 3*num_heads*head_dim)
+        qkv = self.c_attn(x)
+
+        # (bs, seq_len, head_dim*num_heads)
+        q, k, v = qkv.chunk(3, dim=2)
+        
+        # reshape to (bs, seq_len, num_heads, head_dim)
+        # need to do this first before transposing so as to preserve tensor structure:
+        # basically we break the final dimension (num_heads*head_dim) in to two dimensions and then we transpose (1, 2) dimensions
+        q = q.view(bs, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(bs, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(bs, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # faster attentions with flash attention, pre-implemented in pytorch
+        attn_output = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+        attn_output = attn_output.transpose(1, 2).contiguous().view(bs, seq_len, self.num_heads * self.head_dim)
+        out = self.linear_out(attn_output)
+
+        return out
 
 class FeedFoward(nn.Module):
-    """ a simple linear layer followed by a non-linearity """
+    """ simple linear layer sandwiched by a non-linearity """
 
     def __init__(self, embedding_dim):
         super().__init__()
@@ -67,31 +111,42 @@ class FeedFoward(nn.Module):
 
 class Block(nn.Module):
 
-    def __init__(self, num_heads, embedding_dim, seq_len, head_dim, dropout):
+    def __init__(self, 
+                num_heads, 
+                embedding_dim, 
+                head_dim):
         super().__init__()
-        self.mha = MultiHeadAttention(num_heads, embedding_dim, seq_len, head_dim)
+        self.causal_self_attention = CausalSelfAttention(embedding_dim, head_dim, num_heads)
         self.ff = FeedFoward(embedding_dim)
         self.layernorm_1 = nn.LayerNorm(embedding_dim)
         self.layernorm_2 = nn.LayerNorm(embedding_dim)
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
 
-        attn = self.mha(x)
-        sub_block_1 = self.dropout(self.layernorm_1(x + attn))
-        sub_block_2 = self.dropout(self.layernorm_2(sub_block_1 + self.ff(sub_block_1)))
+        attn = self.causal_self_attention(x)
+        sub_block_1 = self.layernorm_1(x + attn)
+        sub_block_2 = self.layernorm_2(sub_block_1 + self.ff(sub_block_1))
 
         return sub_block_2
 
 class GPT(nn.Module):
 
-    def __init__(self, num_blocks, vocab_size, seq_len, num_heads, head_dim, dropout, embedding_dim=64):
+    def __init__(self,
+                num_blocks,
+                vocab_size, 
+                seq_len, 
+                num_heads, 
+                head_dim, 
+                embedding_dim):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, embedding_dim)
         self.positional_embedding = nn.Embedding(seq_len, embedding_dim)
-        self.blocks = nn.Sequential(*[Block(num_heads, embedding_dim, seq_len, head_dim, dropout) for _ in range(num_blocks)])
+        self.blocks = nn.Sequential(*[Block(num_heads, embedding_dim, head_dim) for _ in range(num_blocks)])
         self.layer_norm = nn.LayerNorm(embedding_dim)
-        self.linear_layer = nn.Linear(embedding_dim, vocab_size)
+        self.last_linear_layer = nn.Linear(embedding_dim, vocab_size)
+
+        # weight tying scheme laid out in the original transformers paper
+        self.token_embedding.weight = self.last_linear_layer.weight
 
     def forward(self, x):
         
@@ -99,19 +154,18 @@ class GPT(nn.Module):
         _, curr_seq_len = x.shape
         # x has shape[bs, seq_len]
         token_embedding = self.token_embedding(x)
-        positional_embedding = self.positional_embedding(torch.arange(curr_seq_len, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")))
+        positional_embedding = self.positional_embedding(torch.arange(curr_seq_len, device=x.device))
         x = token_embedding + positional_embedding # [batch_size, seq_len, embedding_dim]
         # TRANSFORMER BLOCK STUFF #
         x = self.blocks(x)
         # TRANSFORMER BLOCK STUFF #
         x = self.layer_norm(x) # [batch_size, seq_len, embedding_dim]
-        out = self.linear_layer(x) # [batch_size, seq_len, vocab_size] 
+        out = self.last_linear_layer(x) # [batch_size, seq_len, vocab_size] 
 
         return out
     
     def generate(self, sequence, max_lookback_tokens, max_new_tokens=1000, temperature=0.7):
         
-        # self.eval()
         for _ in range(max_new_tokens):
             # sequence has shape [bs, seq_len]
             input_sequence = sequence[:, -max_lookback_tokens:]
@@ -128,7 +182,7 @@ class GPT(nn.Module):
             sequence = torch.cat((sequence, sampled_next_token), dim=1)
         
         return sequence
-                        
+
     def configure_optimizers(self, weight_decay, learning_rate, device):
         # start with all of the candidate parameters (that require grad)
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -153,6 +207,35 @@ class GPT(nn.Module):
         print(f"using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
         return optimizer
+
+if __name__ == "__main__":
+
+    # Example configuration
+    embedding_dim = 768  # Example embedding dimension
+    head_dim = 64        # Dimension per head
+    num_heads = 12       # Number of attention heads
+
+    # Instantiate the attention layer
+    attention_layer = CausalSelfAttention(embedding_dim, head_dim, num_heads)
+
+    # Example input: (Batch size, Sequence length, Embedding dimension)
+    input_tensor = torch.randn(32, 10, embedding_dim)  # Batch size of 32 and sequence length of 10
+
+    gpt = GPT(num_blocks=12,
+              vocab_size=50257,
+              seq_len=1024,
+              num_heads=12,
+              head_dim=64,
+              embedding_dim=768
+            )
+    total_params = sum(p.numel() for p in gpt.parameters())
+    x = torch.randint(low=0, high=255, size=(1, 10))
+    y = gpt(x)
+
+
+    ipdb.set_trace()
+    
+
 
 # if __name__ == "__main__":
 
