@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import inspect
 import torch.nn.functional as F
+from dataclasses import dataclass
 import ipdb
 
 #### MANUAL, SLOW IMPLEMENTATION OF ATTENTION ####
@@ -53,7 +54,14 @@ class MultiHeadAttention(nn.Module):
         return self.linear_out(out)
 #### MANUAL, SLOW IMPLEMENTATION OF ATTENTION ####
     
-
+@dataclass
+class GPTConfig:
+    num_blocks: int = 12
+    vocab_size: int = 50257 
+    seq_len: int = 1024 
+    num_heads: int = 12 
+    head_dim: int = 64
+    embedding_dim: int = 768
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, 
@@ -67,6 +75,7 @@ class CausalSelfAttention(nn.Module):
         self.num_heads = num_heads
         self.c_attn = nn.Linear(embedding_dim, 3*num_heads*head_dim, bias=False)
         self.linear_out = nn.Linear(head_dim*num_heads, embedding_dim, bias=False)
+        self.linear_out.NANOGPT_SCALE_INIT = 1
 
     # input has shape (bs, seq_len, emb_dim)
     def forward(self, x):
@@ -100,14 +109,20 @@ class FeedFoward(nn.Module):
 
     def __init__(self, embedding_dim):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(embedding_dim, 4 * embedding_dim),
-            nn.ReLU(),
-            nn.Linear(4 * embedding_dim, embedding_dim),
-        )
+
+        self.first_linear = nn.Linear(embedding_dim, 4 * embedding_dim)
+        self.relu = nn.ReLU()
+        self.final_linear = nn.Linear(4 * embedding_dim, embedding_dim)
+        self.final_linear.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
-        return self.net(x)
+
+        x = self.first_linear(x)
+        x = self.relu(x)
+
+        out = self.final_linear(x)
+
+        return out
 
 class Block(nn.Module):
 
@@ -132,13 +147,18 @@ class Block(nn.Module):
 class GPT(nn.Module):
 
     def __init__(self,
-                num_blocks,
-                vocab_size, 
-                seq_len, 
-                num_heads, 
-                head_dim, 
-                embedding_dim):
+                config,
+                ):
         super().__init__()
+
+        self.config = config
+        num_blocks = config.num_blocks
+        vocab_size = config.vocab_size
+        seq_len = config.seq_len
+        num_heads = config.num_heads
+        head_dim = config.head_dim
+        embedding_dim = config.embedding_dim
+
         self.token_embedding = nn.Embedding(vocab_size, embedding_dim)
         self.positional_embedding = nn.Embedding(seq_len, embedding_dim)
         self.blocks = nn.Sequential(*[Block(num_heads, embedding_dim, head_dim) for _ in range(num_blocks)])
@@ -147,6 +167,20 @@ class GPT(nn.Module):
 
         # weight tying scheme laid out in the original transformers paper
         self.token_embedding.weight = self.last_linear_layer.weight
+
+        self.apply(self._init_weights)
+
+    # weight initialization scheme as applied in original gpt2 paper
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                std *= (2 * self.config.num_blocks) ** -0.5
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, x):
         
@@ -220,53 +254,14 @@ if __name__ == "__main__":
 
     # Example input: (Batch size, Sequence length, Embedding dimension)
     input_tensor = torch.randn(32, 10, embedding_dim)  # Batch size of 32 and sequence length of 10
-
-    gpt = GPT(num_blocks=12,
-              vocab_size=50257,
-              seq_len=1024,
-              num_heads=12,
-              head_dim=64,
-              embedding_dim=768
-            )
+    
+    config = GPTConfig()
+    gpt = GPT(config=GPTConfig())
+              
     total_params = sum(p.numel() for p in gpt.parameters())
     x = torch.randint(low=0, high=255, size=(1, 10))
     y = gpt(x)
 
-
     ipdb.set_trace()
     
-
-
-# if __name__ == "__main__":
-
-#     attention = Attention(64, 5, 16)
-    # mha = MultiHeadAttention(17, 64, 5, 16)
-    # import ipdb
-    # ipdb.set_trace()
-#     block = Block(num_heads=4, embedding_dim=64, seq_len=5, head_dim=16, dropout=0.0)
-    # gpt = GPT(num_blocks=12,
-    #           vocab_size=50257,
-    #           seq_len=1024,
-    #           num_heads=12,
-    #           head_dim=12,
-    #           dropout=0.0,
-    #           embedding_dim=768
-    #         )
-    # total_params = sum(p.numel() for p in gpt.parameters())
-    # print(total_params)
-
-
-#     # x = torch.randn(1, 5, 256)
-#     x = torch.randint(low=0, high=255, size=(1, 2))
-
-#     out = gpt(x)
-
-#     seq = torch.zeros((1,1), dtype=torch.long)
-
-#     output = gpt.generate(seq, max_lookback_tokens=5)
-
-
-#     ipdb.set_trace()
-
-
 
