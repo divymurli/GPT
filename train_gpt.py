@@ -1,16 +1,13 @@
 import torch
 import torch.nn as nn
-import numpy as np
-from model import GPT
+from model import GPT, GPTConfig
 from torch.utils.data import DataLoader
 from sharded_dataset import ShardedTokenDataset
 from tqdm import tqdm
 import torch.optim.lr_scheduler as lr_scheduler
 import tiktoken
-
-from torch.nn.utils.rnn import pad_sequence
-
-
+import time
+import ipdb
 import os
 
 # first pass rudimentary training loop
@@ -27,15 +24,15 @@ def collate_fn(batch):
 
     return torch.stack(padded_inputs), torch.stack(padded_targets)
 
-grad_accum_steps = 16
+grad_accum_steps = 32
 train_batch_size = 32
 eval_batch_size = 32
 block_size = 512
 epochs = 10
 save_every = 1
 check_output_every = 1
-lr = 5e-4
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_float32_matmul_precision('high')
 
 save_dir = "./checkpoints"
 if not os.path.exists(save_dir):
@@ -45,18 +42,10 @@ criterion = nn.CrossEntropyLoss()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 train_dataset = ShardedTokenDataset("./openwebtext_abridged_sharded", 500000, block_size)
-train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True, collate_fn=collate_fn)
+train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=False, collate_fn=collate_fn)
 
-model = GPT(num_blocks=2,
-              vocab_size=50257,
-              seq_len=block_size,
-              num_heads=4,
-              head_dim=4,
-              dropout=0.0,
-              embedding_dim=768
-            )
-
-model = model.to(device)
+model = GPT(GPTConfig(seq_len=block_size))
+model.to(device)
 
 enc = tiktoken.get_encoding("gpt2")
 text = "Hey, I'm a language model. Ask me a question about "
@@ -79,17 +68,18 @@ for epoch in range(epochs):
     optimizer.zero_grad()  # Start with zeroed gradients
     losses = []
     for i, batch in progress_bar:
-
+        tic = time.time()
         if i % 20000 == 0:
             print("========= GENERATED OUTPUT ============")
-            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100).cpu().numpy()[0].tolist()))
+            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, temperature=0.8).cpu().numpy()[0].tolist()))
 
         inputs = batch[0].to(device)
         targets = batch[1].to(device)
 
-        logits =  model(inputs)
-        loss = criterion(logits.view(logits.shape[0]*logits.shape[1], logits.shape[2]), targets.view(-1))
-        
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits =  model(inputs)
+            loss = criterion(logits.view(logits.shape[0]*logits.shape[1], logits.shape[2]), targets.view(-1))
+
         loss /= grad_accum_steps
         loss.backward()
 
@@ -100,6 +90,10 @@ for epoch in range(epochs):
 
         running_loss += loss.item() * grad_accum_steps  # Revert loss normalization for display
         progress_bar.set_postfix({'loss': running_loss / (i + 1)})
+        toc = time.time()
+        token_throughput = inputs.shape[0]*inputs.shape[1] / (toc - tic)
+        # progress_bar.set_postfix({'dt': toc - tic})
+        progress_bar.set_postfix({'token throughput': token_throughput, 'loss': running_loss / (i + 1), 'dt': toc - tic})
 
     # Step the learning rate scheduler at the end of the epoch
     scheduler.step()
