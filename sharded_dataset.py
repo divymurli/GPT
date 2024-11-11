@@ -86,7 +86,7 @@ class ShardedTokenDataset(Dataset):
         input_tokens = torch.tensor(selected_input, dtype=torch.long)
         target_tokens = torch.tensor(selected_target, dtype=torch.long)
 
-        return input_tokens, target_tokens   
+        return input_tokens, target_tokens
 
 # if __name__ == "__main__":
 
