@@ -20,8 +20,15 @@ warmup_steps = 715
 save_every = 10
 max_steps = 83500 # 16*1024*4 = 65536, 65536*167 ~ 11M full tokens (one epoch)
 epochs = 500 # therefore 167*500 = 83500 steps, assuming each step = grad_accum_steps MICRO steps
+# ended up doing 100 epochs rather than 500
 
-save_dir = "./checkpoints_opt_small_massive_overfit"
+save_dir = "./checkpoints_opt_small_massive_overfit2"
+log_dir = "log"
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, f"log.txt")
+with open(log_file, "w") as f: # open for writing to clear the file
+    pass
+
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
@@ -67,6 +74,7 @@ else:
     optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device="cpu")
 
 overall_step = 0
+stepwise_loss = 0
 for epoch in range(epochs):
 
     model.train()
@@ -93,31 +101,35 @@ for epoch in range(epochs):
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             # my model
             # logits =  model(inputs)
-
-            # his model
+            # karpathy's model
             logits, _ =  model(inputs)
-
             loss = criterion(logits.view(logits.shape[0]*logits.shape[1], logits.shape[2]), targets.view(-1))
 
         loss /= grad_accum_steps
+        stepwise_loss += loss.item()
+
         loss.backward()
 
-        if i % grad_accum_steps == 0:
+        if overall_step == 0:
+            lr = get_lr(0)
+
+        if (i + 1) % grad_accum_steps == 0:
             
+            # revert the stepwise loss back to zero
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
             # adjust LR here: one main step = grad_accum*num_gpu micro steps
             lr = get_lr(overall_step)
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
+            
+            with open(log_file, "a") as f:
+                f.write(f"{overall_step} train {stepwise_loss:.6f} | {lr}{lr:.4e} |  \n")
+
+            stepwise_loss = 0
             overall_step += 1
 
             optimizer.step()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
             optimizer.zero_grad()
-        
-        # # adjust LR here: adjusting it every MICRO step rather than every MAJOR step
-        # lr = get_lr(overall_step)
-        # for param_group in optimizer.param_groups:
-        #     param_group['lr'] = lr
 
         running_loss += loss.item() * grad_accum_steps  # Revert loss normalization for display
         progress_bar.set_postfix({'loss': running_loss / (i + 1)})
@@ -125,7 +137,6 @@ for epoch in range(epochs):
         toc = time.time()
         token_throughput = inputs.shape[0]*inputs.shape[1] / (toc - tic)
         progress_bar.set_postfix({'token throughput': token_throughput, 'loss': running_loss / (i + 1), 'dt': toc - tic, 'lr': lr})
-        # overall_step += 1
 
     print(f"Epoch {epoch+1} finished. Mean loss: {running_loss / len(train_dataloader):.4f}")
 

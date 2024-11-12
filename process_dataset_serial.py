@@ -8,10 +8,12 @@ tokenizer = tiktoken.get_encoding("gpt2")
 
 def process_document(doc):
     enc = tiktoken.get_encoding("gpt2")
-    tokens = enc.encode_ordinary(doc)
+    # put document delimiter in the beginning instead of end
+    tokens = [enc._special_tokens['<|endoftext|>']]
+    tokens += enc.encode_ordinary(doc)
 
     # document delimiter
-    tokens.append(enc._special_tokens['<|endoftext|>'])
+    # tokens.append(enc._special_tokens['<|endoftext|>'])
     # recast as np uint16 to save on space 
     tokens = np.array(tokens).astype(np.uint16)
     return tokens
