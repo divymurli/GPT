@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 import ipdb
 
+## My implementation of GPT, following Karpathy's video
+# and taking tidbits of his implementation advce
+
 #### MANUAL, SLOW IMPLEMENTATION OF ATTENTION ####
 class Attention(nn.Module):
 
@@ -53,7 +56,7 @@ class MultiHeadAttention(nn.Module):
 
         return self.linear_out(out)
 #### MANUAL, SLOW IMPLEMENTATION OF ATTENTION ####
-    
+
 @dataclass
 class GPTConfig:
     num_blocks: int = 12
@@ -73,8 +76,8 @@ class CausalSelfAttention(nn.Module):
         self.embedding_dim = embedding_dim
         self.head_dim = head_dim
         self.num_heads = num_heads
-        self.c_attn = nn.Linear(embedding_dim, 3*num_heads*head_dim, bias=False)
-        self.linear_out = nn.Linear(head_dim*num_heads, embedding_dim, bias=False)
+        self.c_attn = nn.Linear(embedding_dim, 3*num_heads*head_dim)
+        self.linear_out = nn.Linear(head_dim*num_heads, embedding_dim)
         self.linear_out.NANOGPT_SCALE_INIT = 1
 
     # input has shape (bs, seq_len, emb_dim)
@@ -104,22 +107,21 @@ class CausalSelfAttention(nn.Module):
 
         return out
 
-class FeedFoward(nn.Module):
+class FeedForward(nn.Module):
     """ simple linear layer sandwiched by a non-linearity """
 
     def __init__(self, embedding_dim):
         super().__init__()
 
         self.first_linear = nn.Linear(embedding_dim, 4 * embedding_dim)
-        self.relu = nn.ReLU()
+        self.gelu    = nn.GELU(approximate='tanh')
         self.final_linear = nn.Linear(4 * embedding_dim, embedding_dim)
         self.final_linear.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
 
         x = self.first_linear(x)
-        x = self.relu(x)
-
+        x = self.gelu(x)
         out = self.final_linear(x)
 
         return out
@@ -132,17 +134,22 @@ class Block(nn.Module):
                 head_dim):
         super().__init__()
         self.causal_self_attention = CausalSelfAttention(embedding_dim, head_dim, num_heads)
-        self.ff = FeedFoward(embedding_dim)
+        self.ff = FeedForward(embedding_dim)
         self.layernorm_1 = nn.LayerNorm(embedding_dim)
         self.layernorm_2 = nn.LayerNorm(embedding_dim)
 
     def forward(self, x):
 
-        attn = self.causal_self_attention(x)
-        sub_block_1 = self.layernorm_1(x + attn)
-        sub_block_2 = self.layernorm_2(sub_block_1 + self.ff(sub_block_1))
+        # gpt2 implementation
+        x = x + self.causal_self_attention(self.layernorm_1(x))
+        x = x + self.ff(self.layernorm_2(x))
+        
+        # original transformers implementation
+        # attn = self.causal_self_attention(x)
+        # sub_block_1 = self.layernorm_1(x + attn)
+        # sub_block_2 = self.layernorm_2(sub_block_1 + self.ff(sub_block_1))
 
-        return sub_block_2
+        return x
 
 class GPT(nn.Module):
 
@@ -163,7 +170,8 @@ class GPT(nn.Module):
         self.positional_embedding = nn.Embedding(seq_len, embedding_dim)
         self.blocks = nn.Sequential(*[Block(num_heads, embedding_dim, head_dim) for _ in range(num_blocks)])
         self.layer_norm = nn.LayerNorm(embedding_dim)
-        self.last_linear_layer = nn.Linear(embedding_dim, vocab_size)
+        # last linear layer doesn't have a bias because of the weight tying scheme
+        self.last_linear_layer = nn.Linear(embedding_dim, vocab_size, bias=False)
 
         # weight tying scheme laid out in the original transformers paper
         self.token_embedding.weight = self.last_linear_layer.weight
@@ -211,6 +219,7 @@ class GPT(nn.Module):
             next_token_probabilities = torch.softmax(logits, dim=-1)
             # sample one token greedily (is it better to argmax or to multinomial sample?)
             sampled_next_token = torch.multinomial(next_token_probabilities, num_samples=1)
+            # sampled_next_token = torch.argmax(next_token_probabilities, dim=-1, keepdim=True)
             # append to the input sequence
             # shape [bs, seq_len + 1]
             sequence = torch.cat((sequence, sampled_next_token), dim=1)
@@ -236,32 +245,10 @@ class GPT(nn.Module):
         print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and device == "cuda"
+        use_fused = fused_available and "cuda" in device
         # if master_process:
         print(f"using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
         return optimizer
-
-if __name__ == "__main__":
-
-    # Example configuration
-    embedding_dim = 768  # Example embedding dimension
-    head_dim = 64        # Dimension per head
-    num_heads = 12       # Number of attention heads
-
-    # Instantiate the attention layer
-    attention_layer = CausalSelfAttention(embedding_dim, head_dim, num_heads)
-
-    # Example input: (Batch size, Sequence length, Embedding dimension)
-    input_tensor = torch.randn(32, 10, embedding_dim)  # Batch size of 32 and sequence length of 10
-    
-    config = GPTConfig()
-    gpt = GPT(config=GPTConfig())
-              
-    total_params = sum(p.numel() for p in gpt.parameters())
-    x = torch.randint(low=0, high=255, size=(1, 10))
-    y = gpt(x)
-
-    ipdb.set_trace()
     
 
