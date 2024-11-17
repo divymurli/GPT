@@ -114,6 +114,8 @@ class FeedForward(nn.Module):
         super().__init__()
 
         self.first_linear = nn.Linear(embedding_dim, 4 * embedding_dim)
+        # I decided to just go with GPT's original implementation of 
+        # gelu, but I'd like to understand why it's better than relu
         self.gelu    = nn.GELU(approximate='tanh')
         self.final_linear = nn.Linear(4 * embedding_dim, embedding_dim)
         self.final_linear.NANOGPT_SCALE_INIT = 1
