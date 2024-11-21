@@ -23,7 +23,7 @@ epochs = 500 # therefore 167*500 = 83500 steps, assuming each step = grad_accum_
 # ended up doing 100 epochs rather than 500
 
 save_dir = "./checkpoints_opt_small_massive_overfit2"
-log_dir = "log"
+log_dir = "log6"
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"log.txt")
 with open(log_file, "w") as f: # open for writing to clear the file
@@ -59,13 +59,7 @@ train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffl
 criterion = nn.CrossEntropyLoss()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# My architecture causing weird repetitiveness in generative outputs
-# model = GPT(GPTConfig())
-# model.to(device)
-
-# Run with his architecture, to see if I can overfit to my
-# dataset
-model = karpathy_model.GPT(karpathy_model.GPTConfig())
+model = GPT(GPTConfig())
 model.to(device)
 
 if torch.cuda.is_available():
@@ -92,7 +86,7 @@ for epoch in range(epochs):
             text = "A little less dark but no less harmful is a bully situation where a friend "
             encoded_tokens = enc.encode_ordinary(text)
             print("========= GENERATED OUTPUT ============")
-            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.7).cpu().numpy()[0].tolist()))
+            print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.9).cpu().numpy()[0].tolist()))
 
         tic = time.time()
         inputs = batch[0].to(device)
@@ -102,7 +96,7 @@ for epoch in range(epochs):
             # my model
             # logits =  model(inputs)
             # karpathy's model
-            logits, _ =  model(inputs)
+            logits =  model(inputs)
             loss = criterion(logits.view(logits.shape[0]*logits.shape[1], logits.shape[2]), targets.view(-1))
 
         loss /= grad_accum_steps
