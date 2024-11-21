@@ -12,14 +12,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import tiktoken
 
-grad_accum_steps = 4
+grad_accum_steps = 16
 train_batch_size = 16
 max_lr = 6e-4
 min_lr = max_lr * 0.1
 warmup_steps = 715
-save_every = 10
-max_steps = 83500 # 16*1024*4 = 65536, 65536*167 ~ 11M full tokens (one epoch)
-epochs = 500 # therefore 167*500 = 83500 steps, assuming each step = grad_accum_steps MICRO steps
+save_every = 1
+max_steps = 38000 # 16*1024*16*38000 ~10B tokens, size of the whole datasest for fineweb
+epochs = 1 # therefore 167*500 = 83500 steps, assuming each step = grad_accum_steps MICRO steps
 # ended up doing 100 epochs rather than 500
 
 save_dir = "./checkpoints"
@@ -83,7 +83,7 @@ for epoch in range(epochs):
             model.eval()
             print(f"Overall step: {overall_step}")
             enc = tiktoken.get_encoding("gpt2")
-            text = "A little less dark but no less harmful is a bully situation where a friend "
+            text = "Hello, I am a language model, "
             encoded_tokens = enc.encode_ordinary(text)
             print("========= GENERATED OUTPUT ============")
             print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.9).cpu().numpy()[0].tolist()))
@@ -93,9 +93,7 @@ for epoch in range(epochs):
         targets = batch[1].to(device)
 
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            # my model
-            # logits =  model(inputs)
-            # karpathy's model
+
             logits =  model(inputs)
             loss = criterion(logits.view(logits.shape[0]*logits.shape[1], logits.shape[2]), targets.view(-1))
 
