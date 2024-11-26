@@ -89,6 +89,38 @@ We find that using a temperature of 0.3 produces the least chaotic outputs.
 We leave this here, and move onto a beefier training run.
 
 
-## 2. A slightly more coherent GPT: attempting the full OpenWebText dataset, on mulitple GPUs.
+## 2. A slightly more coherent GPT: attempting the full FineWeb dataset.
 
+## Single GPU
+We ended up training our GPT model on the [edu-fineweb](https://huggingface.co/spaces/HuggingFaceFW/blogpost-fineweb-v1) dataset, as in Karpathy's lecture. Training for one epoch on a single A10G GPU took about 60 hours.
+
+ According to [Karpathy](https://x.com/karpathy/status/1795513568655487221?prefetchTimestamp=1732596994254), we were able to (marginally) surpass the performance of the original GPT2 model because edu-fineweb is a better-curated dataset than the original (unreleased) dataset that GPT2 was trained on. To evaluate, we simply used the [hellawag](https://github.com/karpathy/build-nanogpt/blob/master/hellaswag.py) script from the `build-nanogpt` repo. 
+
+ We got the following hellaswag eval results:
+
+Ours:
+ ```
+10042 acc_norm: 3060/10042=0.3047
+ ```
+
+ GPT2 Baseline:
+ ```
+10042 acc_norm: 2968/10042=0.2956
+ ```
+
+ Sample generation looks like (prompted with `"Hello, I am a langauge model,"`)
+
+```
+ sample 0: Hello, I am a language model, it was not done for people. There were a lot of students to learn this language. I learnt most of them. One of them said… "I know how to speak English and how to use English in my life, if I could speak a second language. It will take me more time to do more. We never ask for it, we don't even hear about it, I get it. I'll learn it and my
+
+sample 1: Hello, I am a language model, and I have no knowledge of the world. No. I am just having an interest in the technology. It is amazing. And I wonder why I have been there, and not the people who see me, and who know I have just gone out and looked at me - and they know me because we know each other intimately and I share their feelings a lot. I will be there for ever, and I must say thank you.
+A few weeks ago
+```
+
+Certainly more coherent, but far from the state-of-the-art (even GPT3, which doesn't use RLHF is far better). As always, more data and more epochs will aid with performance. The purpose of this repo is to get a feel for what pretraining an LLM is actually like, and what the challenges actually are. As we've seen, it's clear that to even get somewhat coherent results LLMs need an enormous amount of data. As a simple individual limited on resources and money, getting a functioning model is quite tough!
+
+To run the single GPU version, first generate the tokenized data shards with `python tokenize_dataset.py`. 100 shards, each with 100M tokens (save for the last (validation) shard which will have less) and will be saved to your local file system under `./edu_fineweb`. Then simply run `python train_gpt_single_gpu.py`, but in line 56 make sure to put the correct path to your dataset shards. After an eternity (and your hair turning first grey then white), you'll see a model checkpoint pop out and you can evaluate it just like above with `python hellawsag.py`. Just be sure to uncomment the lines betwen `### MY TRAINED MODEL ###` and you're good to go. To generate outputs, use `python generate_sequences.py`.
+
+
+## Multi GPU
 
