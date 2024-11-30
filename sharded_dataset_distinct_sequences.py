@@ -17,7 +17,7 @@ class ShardedTokenDataset(Dataset):
         self.cached_shard_idx = -1
         self.shard_files = sorted([os.path.join(shard_dir, f) for f in os.listdir(shard_dir) if f.startswith("shard_") and f.endswith('.npy')])
         if val:
-            self.shard_files = os.path.join(shard_dir, "val_shard_99.npy")
+            self.shard_files = [os.path.join(shard_dir, "val_shard_99.npy")]
         self.num_shards = len(self.shard_files)
 
         # Calculate total number of tokens in the dataset
@@ -31,7 +31,9 @@ class ShardedTokenDataset(Dataset):
         self.total_sequences = total_tokens // (seq_len + 1)
 
     def _load_shard(self, shard_idx):
+   
         if self.cached_shard_idx != shard_idx:
+
             self.cached_shard = np.load(self.shard_files[shard_idx]).astype(np.int32)
             # self.cached_shard = np.load(os.path.join(self.shard_dir, f"shard_{shard_idx}.npy"))
             self.cached_shard_idx = shard_idx
