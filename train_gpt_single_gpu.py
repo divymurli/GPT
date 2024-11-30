@@ -19,8 +19,7 @@ min_lr = max_lr * 0.1
 warmup_steps = 715
 save_every = 1
 max_steps = 38000 # 16*1024*16*38000 ~10B tokens, size of the whole datasest for fineweb
-epochs = 1 # therefore 167*500 = 83500 steps, assuming each step = grad_accum_steps MICRO steps
-# ended up doing 100 epochs rather than 500
+epochs = 1 
 
 save_dir = "./checkpoints"
 log_dir = "log"
