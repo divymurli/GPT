@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from model import GPT, GPTConfig
-import karpathy_model
 from sharded_dataset_distinct_sequences import ShardedTokenDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -21,31 +20,43 @@ from torch.utils.data.distributed import DistributedSampler
 ### Specify all the DDP stuff
 assert torch.cuda.is_available()
 init_process_group(backend='nccl')
-ddp_rank = int(os.environ['RANK'])
-ddp_local_rank = int(os.environ['LOCAL_RANK'])
-ddp_world_size = int(os.environ['WORLD_SIZE'])
+
+ddp_rank = int(os.environ.get('RANK', 0))
+ddp_local_rank = int(os.environ.get('LOCAL_RANK', 0))
+ddp_world_size = int(os.environ.get('WORLD_SIZE', 1))
+
 device = f'cuda:{ddp_local_rank}'
 torch.cuda.set_device(device)
 master_process = ddp_rank == 0 # for logging, checkpointing
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
-### 4 GPU setup, A10G, seq len 1024
-total_batch_size = 65536
-train_batch_size = 16
-grad_accum_steps = 4
+# ### 4 GPU setup, A10G, seq len 1024
+# total_batch_size = 65536
+# train_batch_size = 16
+# val_batch_size = 8
+# grad_accum_steps = 4
+# epochs = 1
+# max_steps = 151000 # 16*4*1024 = 65536, 65536*151000 ~ 10B tokens (size of edu fineweb dataset)
+
+### 8 GPU setup, A100, seq len 1024
+total_batch_size = 524288
+train_batch_size = 64
+val_batch_size = 32
+grad_accum_steps = 1
 epochs = 1
-max_steps = 151000 # 16*4*1024 = 65536, 65536*151000 ~ 10B tokens (size of edu fineweb dataset)
+max_steps = 20000 # 64 microbatch_size * 1024 seq_len * 1 grad_accum * 8 gpu = 524288. 524288 * 20000 ~ 10B tokens
 
 # Set hparams
 max_lr = 6e-4
 min_lr = max_lr * 0.1
 warmup_steps = 715
-save_every = 1
+save_every = 5000
 
 save_dir = "./checkpoints"
-log_dir = "log"
+log_dir = "log_multigpu"
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"log.txt")
+val_log_file = os.path.join(log_dir, f"val_log.txt")
 with open(log_file, "w") as f: # open for writing to clear the file
     pass
 
@@ -74,7 +85,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_float32_matmul_precision('high')
 
 train_dataset = ShardedTokenDataset("../edu_fineweb", 100000000, 1024)
+val_dataset = ShardedTokenDataset("../edu_fineweb", 100000000, 1024, val=True)
+
 train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=False, sampler=DistributedSampler(train_dataset))
+val_dataloader = DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False, sampler=DistributedSampler(val_dataset))
 
 criterion = nn.CrossEntropyLoss()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,19 +107,40 @@ for epoch in range(epochs):
     model.train()
     running_loss = 0.0
     progress_bar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc=f"Epoch {epoch+1}", disable=(ddp_rank != 0))
+    val_progress_bar = tqdm(enumerate(val_dataloader), total=len(val_dataloader), desc=f"Epoch {epoch+1}", disable=(ddp_rank != 0))
     optimizer.zero_grad()  # Start with zeroed gradients
     losses = []
     for i, batch in progress_bar:
         
-        # # generate an output every 1000 major steps (NOT micro steps)
-        # if overall_step % 1000 == 0:
-        #     model.eval()
-        #     print(f"Overall step: {overall_step}")
-        #     enc = tiktoken.get_encoding("gpt2")
-        #     text = "A little less dark but no less harmful is a bully situation where a friend "
-        #     encoded_tokens = enc.encode_ordinary(text)
-        #     print("========= GENERATED OUTPUT ============")
-        #     print(enc.decode(model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.9).cpu().numpy()[0].tolist()))
+        # generate an output every 1000 major steps (NOT micro steps)
+        if overall_step % 1000 == 0:
+            if master_process:
+                model.eval()
+                print(f"Overall step: {overall_step}")
+                enc = tiktoken.get_encoding("gpt2")
+                text = "A little less dark but no less harmful is a bully situation where a friend "
+                encoded_tokens = enc.encode_ordinary(text)
+                print("========= GENERATED OUTPUT ============")
+                print(enc.decode(raw_model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.7).cpu().numpy()[0].tolist()))
+
+        if overall_step % 200 == 0:
+            model.eval()
+            val_loss = 0
+            for j, val_batch in val_progress_bar:
+
+                inputs = val_batch[0].to(device)
+                targets = val_batch[1].to(device)
+
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    logits =  model(inputs)
+                    loss = criterion(logits.view(logits.shape[0]*logits.shape[1], logits.shape[2]), targets.view(-1))
+                loss = loss / len(val_progress_bar)
+                val_loss += loss.detach()
+                dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
+            
+                if master_process and j == len(val_progress_bar) - 1:
+                    with open(val_log_file, "a") as f:
+                        f.write(f"{overall_step} val {val_loss.item():.4f}\n")
 
         # Disable gradient synchronization for accumulation steps
         model.require_backward_grad_sync = (i + 1) % grad_accum_steps == 0
@@ -141,7 +176,7 @@ for epoch in range(epochs):
             
             if master_process:
                 with open(log_file, "a") as f:
-                    f.write(f"{overall_step} train {stepwise_loss.item():.6f} | {lr}{lr:.4e} |  \n")
+                    f.write(f"{overall_step} train {stepwise_loss.item():.6f} | lr {lr:.4e} |  \n")
 
             stepwise_loss = 0
             overall_step += 1
@@ -153,19 +188,19 @@ for epoch in range(epochs):
         progress_bar.set_postfix({'loss': running_loss / (i + 1)})
         torch.cuda.synchronize() 
         toc = time.time()
-        token_throughput = inputs.shape[0]*inputs.shape[1] / (toc - tic)
+        token_throughput = inputs.shape[0]*inputs.shape[1]*ddp_world_size / (toc - tic)
 
         if master_process:
             progress_bar.set_postfix({'token throughput': token_throughput, 'loss': running_loss / (i + 1), 'dt': toc - tic, 'lr': lr})
 
     print(f"Epoch {epoch+1} finished. Mean loss: {running_loss / len(train_dataloader):.4f}")
 
-    if (epoch + 1) % save_every == 0:
+    if overall_step % save_every == 0:
         torch.save({
             'epoch': epoch + 1,
             'model_state_dict': raw_model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-        }, f"{save_dir}/model_epoch_{epoch + 1}.pth")
+        }, f"{save_dir}/model_epoch_{epoch + 1}_multigpu.pth")
 
 destroy_process_group()
 
