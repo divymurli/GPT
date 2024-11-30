@@ -3,7 +3,6 @@ import torch.nn as nn
 import inspect
 import torch.nn.functional as F
 from dataclasses import dataclass
-import ipdb
 
 ## My implementation of GPT, following Karpathy's video
 # and taking tidbits of his implementation advce
