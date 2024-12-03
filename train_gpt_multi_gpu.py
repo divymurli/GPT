@@ -31,12 +31,12 @@ master_process = ddp_rank == 0 # for logging, checkpointing
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 ### 8 GPU setup, L40S, seq len 1024
-total_batch_size = 131072
+total_batch_size = 524288
 train_batch_size = 32
 val_batch_size = 16
 grad_accum_steps = 4
 epochs = 1
-max_steps = 70500 # 16*8*1024 = 131072, 131072*70500 ~ 10B tokens (size of edu fineweb dataset)
+max_steps = 9200 # 32*4*8*1024 = 1048576, 1048576*9200 ~ 10B tokens (size of edu fineweb dataset)
 
 # ### 8 GPU setup, A100, seq len 1024
 # total_batch_size = 524288
@@ -50,9 +50,9 @@ max_steps = 70500 # 16*8*1024 = 131072, 131072*70500 ~ 10B tokens (size of edu f
 max_lr = 6e-4
 min_lr = max_lr * 0.1
 warmup_steps = 715
-save_every = 5000
+save_every = 1000
 
-save_dir = "./checkpoints"
+save_dir = "checkpoints"
 log_dir = "log_multigpu"
 
 os.makedirs(log_dir, exist_ok=True)
@@ -108,11 +108,13 @@ for epoch in range(epochs):
     model.train()
     running_loss = 0.0
     progress_bar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc=f"Epoch {epoch+1}", disable=(ddp_rank != 0))
-    val_progress_bar = tqdm(enumerate(val_dataloader), total=len(val_dataloader), desc=f"Epoch {epoch+1}", disable=(ddp_rank != 0))
     optimizer.zero_grad()  # Start with zeroed gradients
     losses = []
     for i, batch in progress_bar:
-        
+        # print(overall_step)
+        if overall_step % 1 == 0:
+            if master_process:
+                print(f"Overall step: {overall_step}")
         # generate an output every 1000 major steps (NOT micro steps)
         if overall_step % 1000 == 0:
             if master_process:
@@ -124,7 +126,10 @@ for epoch in range(epochs):
                 print("========= GENERATED OUTPUT ============")
                 print(enc.decode(raw_model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.7).cpu().numpy()[0].tolist()))
 
-        if overall_step % 200 == 0:
+        # Write out val loss only once
+        if overall_step % 200 == 0 and (i + 1) % grad_accum_steps == 0:
+            # Need to re-instantiate the progress bar each time
+            val_progress_bar = tqdm(enumerate(val_dataloader), total=len(val_dataloader), desc=f"Epoch {epoch+1}", disable=(ddp_rank != 0))
             model.eval()
             val_loss = 0
             for j, val_batch in val_progress_bar:
@@ -142,6 +147,7 @@ for epoch in range(epochs):
                 if master_process and j == len(val_progress_bar) - 1:
                     with open(val_log_file, "a") as f:
                         f.write(f"{overall_step} val {val_loss.item():.4f}\n")
+            model.train()
 
         # Disable gradient synchronization for accumulation steps
         model.require_backward_grad_sync = (i + 1) % grad_accum_steps == 0
@@ -191,17 +197,19 @@ for epoch in range(epochs):
         toc = time.time()
         token_throughput = inputs.shape[0]*inputs.shape[1]*ddp_world_size / (toc - tic)
 
+        if overall_step % save_every == 0:
+            if master_process:
+                print("Saving checkpoint ...")
+                torch.save({
+                    'epoch': epoch + 1,
+                    'model_state_dict': raw_model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                }, f"{save_dir}/model_step_{overall_step + 1}_multigpu.pth")
+
         if master_process:
             progress_bar.set_postfix({'token throughput': token_throughput, 'loss': running_loss / (i + 1), 'dt': toc - tic, 'lr': lr})
 
     print(f"Epoch {epoch+1} finished. Mean loss: {running_loss / len(train_dataloader):.4f}")
-
-    if overall_step % save_every == 0:
-        torch.save({
-            'epoch': epoch + 1,
-            'model_state_dict': raw_model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-        }, f"{save_dir}/model_epoch_{epoch + 1}_multigpu.pth")
 
 destroy_process_group()
 

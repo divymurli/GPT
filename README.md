@@ -124,3 +124,4 @@ To run the single GPU version, first generate the tokenized data shards with `py
 
 ## Multi GPU
 
+Due to the lack of availability of multi-GPU machines (especially A100 boxes) and the prohibitive cost, we temporarily table this task for another time. We did test the `train_gpu_multi_gpu` script on an 8x L40s box and at least for the first few steps got expected behaviour.
