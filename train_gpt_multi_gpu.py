@@ -30,21 +30,21 @@ torch.cuda.set_device(device)
 master_process = ddp_rank == 0 # for logging, checkpointing
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
-# ### 4 GPU setup, A10G, seq len 1024
-# total_batch_size = 65536
-# train_batch_size = 16
-# val_batch_size = 8
-# grad_accum_steps = 4
-# epochs = 1
-# max_steps = 151000 # 16*4*1024 = 65536, 65536*151000 ~ 10B tokens (size of edu fineweb dataset)
-
-### 8 GPU setup, A100, seq len 1024
-total_batch_size = 524288
-train_batch_size = 64
-val_batch_size = 32
-grad_accum_steps = 1
+### 8 GPU setup, L40S, seq len 1024
+total_batch_size = 131072
+train_batch_size = 32
+val_batch_size = 16
+grad_accum_steps = 4
 epochs = 1
-max_steps = 20000 # 64 microbatch_size * 1024 seq_len * 1 grad_accum * 8 gpu = 524288. 524288 * 20000 ~ 10B tokens
+max_steps = 70500 # 16*8*1024 = 131072, 131072*70500 ~ 10B tokens (size of edu fineweb dataset)
+
+# ### 8 GPU setup, A100, seq len 1024
+# total_batch_size = 524288
+# train_batch_size = 64
+# val_batch_size = 32
+# grad_accum_steps = 1
+# epochs = 1
+# max_steps = 20000 # 64 microbatch_size * 1024 seq_len * 1 grad_accum * 8 gpu = 524288. 524288 * 20000 ~ 10B tokens
 
 # Set hparams
 max_lr = 6e-4
@@ -54,6 +54,7 @@ save_every = 5000
 
 save_dir = "./checkpoints"
 log_dir = "log_multigpu"
+
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"log.txt")
 val_log_file = os.path.join(log_dir, f"val_log.txt")
@@ -118,7 +119,7 @@ for epoch in range(epochs):
                 model.eval()
                 print(f"Overall step: {overall_step}")
                 enc = tiktoken.get_encoding("gpt2")
-                text = "A little less dark but no less harmful is a bully situation where a friend "
+                text = "Hello, I am a language model,"
                 encoded_tokens = enc.encode_ordinary(text)
                 print("========= GENERATED OUTPUT ============")
                 print(enc.decode(raw_model.generate(torch.tensor([encoded_tokens]).to(device), 60, 100, 0.7).cpu().numpy()[0].tolist()))
